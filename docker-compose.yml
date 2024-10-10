@@ -1,7 +1,12 @@
-version: "3.5"
+name: ms-emp10-temporal-1-0-0
+
 services:
-  elasticsearch:
-    container_name: temporal-elasticsearch
+  temporal-elasticsearch:
+    image: elasticsearch:7.16.2
+    env_file:
+      - path: ./.env
+        required: true
+    container_name: ${ES_CONTAINER_NAME}
     environment:
       - cluster.routing.allocation.disk.threshold_enabled=true
       - cluster.routing.allocation.disk.watermark.low=512mb
@@ -10,72 +15,90 @@ services:
       - discovery.type=single-node
       - ES_JAVA_OPTS=-Xms256m -Xmx256m
       - xpack.security.enabled=false
-    image: elasticsearch:${ELASTICSEARCH_VERSION}
     networks:
-      - temporal-network
+      - ms-emp10-1-0-0-net
     expose:
       - 9200
     volumes:
-      - /var/lib/elasticsearch/data
-  postgresql:
-    container_name: temporal-postgresql
+      - elasticsearch:/var/lib/elasticsearch/data
+
+  temporal-psql:
+    image: postgres:16.4-alpine3.20
+    container_name: ${POSTGRES_CONTAINER_NAME}
     environment:
-      POSTGRES_PASSWORD: temporal
-      POSTGRES_USER: temporal
-    image: postgres:${POSTGRESQL_VERSION}
+      - POSTGRES_USER=${POSTGRES_CONTAINER_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_CONTAINER_PASSWORD}
     networks:
-      - temporal-network
+      - ms-emp10-1-0-0-net
     expose:
-      - 5432
+      - ${POSTGRES_CONTAINER_TCP_PORT}
     volumes:
-      - /var/lib/postgresql/data
+      - psql:/var/lib/postgresql/data
+
   temporal:
-    container_name: temporal
+    image: temporalio/auto-setup:1.25.0
+    env_file:
+      - path: ./.env
+        required: true
+    container_name: ${TEMPORAL_CONTAINER_NAME}
     depends_on:
-      - postgresql
-      - elasticsearch
+      - temporal-psql
+      - temporal-elasticsearch
     environment:
+      - DB_PORT=${POSTGRES_CONTAINER_TCP_PORT}
       - DB=postgres12
-      - DB_PORT=5432
-      - POSTGRES_USER=temporal
-      - POSTGRES_PWD=temporal
-      - POSTGRES_SEEDS=postgresql
+      - POSTGRES_USER=${POSTGRES_CONTAINER_USER}
+      - POSTGRES_PWD=${POSTGRES_CONTAINER_PASSWORD}
+      - POSTGRES_SEEDS=temporal-psql
       - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
       - ENABLE_ES=true
-      - ES_SEEDS=elasticsearch
+      - ES_SEEDS=temporal-elasticsearch
       - ES_VERSION=v7
-    image: temporalio/auto-setup:${TEMPORAL_VERSION}
     networks:
-      - temporal-network
+      - ms-emp10-1-0-0-net
     ports:
-      - 7233:7233
+      - ${TEMPORAL_HOST_HTTP_TCP_PORT}:7233
     volumes:
       - ./dynamicconfig:/etc/temporal/config/dynamicconfig
+
   temporal-admin-tools:
-    container_name: temporal-admin-tools
+    image: temporalio/admin-tools:1.25.0-tctl-1.18.1-cli-1.0.0
+    env_file:
+      - path: ./.env
+        required: true
+    container_name: ${ADMIN_TOOLS_CONTAINER_NAME}
     depends_on:
       - temporal
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_CLI_ADDRESS=temporal:7233
-    image: temporalio/admin-tools:${TEMPORAL_ADMINTOOLS_VERSION}
     networks:
-      - temporal-network
+      - ms-emp10-1-0-0-net
     stdin_open: true
     tty: true
+
   temporal-ui:
-    container_name: temporal-ui
+    image: temporalio/ui:2.31.2
+    env_file:
+      - path: ./.env
+        required: true
+    container_name: ${UI_CONTAINER_NAME}
     depends_on:
       - temporal
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_CORS_ORIGINS=http://localhost:3000
-    image: temporalio/ui:${TEMPORAL_UI_VERSION}
     networks:
-      - temporal-network
+      - ms-emp10-1-0-0-net
     ports:
-      - 8080:8080
+      - ${UI_HOST_HTTP_TCP_PORT}:8080
+      
+volumes:
+  elasticsearch:
+    driver: local
+  psql:
+    driver: local
+
 networks:
-  temporal-network:
-    driver: bridge
-    name: temporal-network
+  ms-emp10-1-0-0-net:
+    external: true
